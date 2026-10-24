@@ -1,41 +1,9 @@
-// ===== Хранилище с защитой =====
-const STORAGE_KEY = 'mainten_tournament_players';
+// ===== ПОДКЛЮЧЕНИЕ SUPABASE =====
+// Замени на свои значения из Settings → API
+const SUPABASE_URL = 'https://ТВОЙ_ПРОЕКТ.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsY2dyd3N1Z2xrbXB6Z3Vic2NmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4MTQzMTgsImV4cCI6MjEwODM5MDMxOH0.M4oLoE8pw47TbcQW8eU9xY9gBVgeLj7KYo6fK1chNnY';
 
-const Storage = (() => {
-  let available = false;
-  try {
-    const t = '__test__';
-    localStorage.setItem(t, t);
-    localStorage.removeItem(t);
-    available = true;
-  } catch (e) {
-    console.warn('⚠️ localStorage недоступен, данные не сохранятся между перезагрузками.', e);
-  }
-  let memory = [];
-  return {
-    isAvailable: () => available,
-    load() {
-      if (!available) return memory;
-      try {
-        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-      } catch (e) {
-        console.error('Ошибка чтения localStorage:', e);
-        return [];
-      }
-    },
-    save(players) {
-      memory = players;
-      if (!available) return false;
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(players));
-        return true;
-      } catch (e) {
-        console.error('Ошибка записи в localStorage:', e);
-        return false;
-      }
-    }
-  };
-})();
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ===== Элементы =====
 const form = document.getElementById('playerForm');
@@ -45,7 +13,7 @@ const resetBtn = document.getElementById('resetBtn');
 const exportBtn = document.getElementById('exportBtn');
 const toast = document.getElementById('toast');
 
-let players = Storage.load();
+let players = [];
 
 // ===== Утилиты =====
 function showToast(msg, isError = false) {
@@ -64,6 +32,22 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
+}
+
+// ===== Загрузка списка из Supabase =====
+async function loadPlayers() {
+  const { data, error } = await supabase
+    .from('players')
+    .select('*')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Ошибка загрузки:', error);
+    showToast('Не удалось загрузить список', true);
+    return;
+  }
+  players = data || [];
+  render();
 }
 
 // ===== Рендер =====
@@ -86,14 +70,14 @@ function render() {
           <div class="fio">${safeFio}</div>
           <a class="steam-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>
         </div>
-        <button class="remove" data-index="${i}" title="Удалить" aria-label="Удалить">✕</button>
+        <button class="remove" data-id="${p.id}" title="Удалить" aria-label="Удалить">✕</button>
       </div>
     `;
   }).join('');
 }
 
-// ===== Добавление =====
-form.addEventListener('submit', (e) => {
+// ===== Добавление (пишем в Supabase) =====
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const nick = document.getElementById('nick').value.trim();
   const fio = document.getElementById('fio').value.trim();
@@ -120,40 +104,62 @@ form.addEventListener('submit', (e) => {
     return;
   }
 
-  players.push({ nick, fio, steam });
-  const ok = Storage.save(players);
-  render();
+  const { error } = await supabase
+    .from('players')
+    .insert({ nick, fio, steam });
+
+  if (error) {
+    console.error('Ошибка добавления:', error);
+    showToast('Ошибка при сохранении. Попробуйте ещё раз.', true);
+    return;
+  }
+
   form.reset();
   document.getElementById('nick').focus();
-
-  if (ok) {
-    showToast('✅ Участник сохранён!');
-  } else {
-    showToast('⚠️ Добавлено, но НЕ сохранится после перезагрузки', true);
-  }
+  showToast('✅ Участник добавлен!');
+  await loadPlayers(); // перезагружаем список с сервера
 });
 
-// ===== Удаление =====
-list.addEventListener('click', (e) => {
+// ===== Удаление (удаляем из Supabase) =====
+list.addEventListener('click', async (e) => {
   const btn = e.target.closest('.remove');
   if (!btn) return;
-  const idx = Number(btn.dataset.index);
-  const removed = players[idx];
-  players.splice(idx, 1);
-  const ok = Storage.save(players);
-  render();
-  showToast(ok ? `Удалён: ${removed.nick}` : `Удалён (не сохранено): ${removed.nick}`, !ok);
+  const id = Number(btn.dataset.id);
+  const removed = players.find(p => p.id === id);
+
+  const { error } = await supabase
+    .from('players')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Ошибка удаления:', error);
+    showToast('Не удалось удалить', true);
+    return;
+  }
+
+  showToast(`Удалён: ${removed ? removed.nick : 'участник'}`);
+  await loadPlayers();
 });
 
-// ===== Очистка =====
-resetBtn.addEventListener('click', () => {
+// ===== Очистка всего списка =====
+resetBtn.addEventListener('click', async () => {
   if (players.length === 0) return;
-  if (confirm('Удалить всех участников из списка?')) {
-    players = [];
-    Storage.save(players);
-    render();
-    showToast('Список очищен');
+  if (!confirm('Удалить всех участников из списка? Это действие необратимо.')) return;
+
+  const { error } = await supabase
+    .from('players')
+    .delete()
+    .neq('id', 0); // удаляет все строки
+
+  if (error) {
+    console.error('Ошибка очистки:', error);
+    showToast('Не удалось очистить список', true);
+    return;
   }
+
+  showToast('Список очищен');
+  await loadPlayers();
 });
 
 // ===== Экспорт CSV =====
@@ -189,9 +195,5 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// ===== Старт =====
-render();
-if (!Storage.isAvailable()) {
-  setTimeout(() => showToast('⚠️ Браузер блокирует сохранение. Откройте сайт через http(s) и не в инкогнито.', true), 800);
-}
-console.log('Mainten: игроков загружено —', players.length, '| storage доступен:', Storage.isAvailable());
+// ===== Старт: загружаем данные из облака =====
+loadPlayers();
