@@ -1,6 +1,6 @@
 // ===== ПОДКЛЮЧЕНИЕ SUPABASE =====
 // Замени на свои значения из Settings → API
-const SUPABASE_URL = 'https://ТВОЙ_ПРОЕКТ.supabase.co';
+const SUPABASE_URL = 'https://clcgrwsuglkmpzgubscf.supabase.co/';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsY2dyd3N1Z2xrbXB6Z3Vic2NmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4MTQzMTgsImV4cCI6MjEwODM5MDMxOH0.M4oLoE8pw47TbcQW8eU9xY9gBVgeLj7KYo6fK1chNnY';
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
